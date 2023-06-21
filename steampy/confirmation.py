@@ -12,10 +12,10 @@ from steampy.login import InvalidCredentials
 
 
 class Confirmation:
-    def __init__(self, _id, data_confid, data_key):
-        self.id = _id.split('conf')[1]
+    def __init__(self, data_confid, creator_id, nonce):
         self.data_confid = data_confid
-        self.data_key = data_key
+        self.creator_id = creator_id
+        self.nonce = nonce
 
 
 class Tag(enum.Enum):
@@ -44,51 +44,53 @@ class ConfirmationExecutor:
         return self._send_confirmation(confirmation)
 
     def _send_confirmation(self, confirmation: Confirmation) -> dict:
-        tag = Tag.ALLOW
-        params = self._create_confirmation_params(tag.value)
-        params['op'] = tag.value,
+        tag = Tag.ALLOW.value
+        params = self._create_confirmation_params(tag)
+        params['op'] = tag,
         params['cid'] = confirmation.data_confid
-        params['ck'] = confirmation.data_key
+        params['ck'] = confirmation.nonce
         headers = {'X-Requested-With': 'XMLHttpRequest'}
         return self._session.get(self.CONF_URL + '/ajaxop', params=params, headers=headers).json()
 
     def _get_confirmations(self) -> List[Confirmation]:
         confirmations = []
         confirmations_page = self._fetch_confirmations_page()
-        soup = BeautifulSoup(confirmations_page.text, 'html.parser')
-        if soup.select('#mobileconf_empty'):
+        if confirmations_page.status_code == 200:
+            confirmations_json = json.loads(confirmations_page.text)
+            for conf in confirmations_json['conf']:
+                data_confid = conf['id']
+                creator_id = conf['creator_id']
+                nonce = conf['nonce']
+                confirmations.append(Confirmation(data_confid, creator_id, nonce))
             return confirmations
-        for confirmation_div in soup.select('#mobileconf_list .mobileconf_list_entry'):
-            _id = confirmation_div['id']
-            data_confid = confirmation_div['data-confid']
-            data_key = confirmation_div['data-key']
-            confirmations.append(Confirmation(_id, data_confid, data_key))
-        return confirmations
+        else:
+            raise ConfirmationExpected
 
     def _fetch_confirmations_page(self) -> requests.Response:
         tag = Tag.CONF.value
         params = self._create_confirmation_params(tag)
         headers = {'X-Requested-With': 'com.valvesoftware.android.steam.community'}
-        response = self._session.get(self.CONF_URL + '/conf', params=params, headers=headers)
+        response = self._session.get(self.CONF_URL + '/getlist', params=params, headers=headers)
         if 'Steam Guard Mobile Authenticator is providing incorrect Steam Guard codes.' in response.text:
             raise InvalidCredentials('Invalid Steam Guard file')
         return response
 
     def _fetch_confirmation_details_page(self, confirmation: Confirmation) -> str:
-        tag = 'details' + confirmation.id
+        tag = 'details' + confirmation.data_confid
         params = self._create_confirmation_params(tag)
-        response = self._session.get(self.CONF_URL + '/details/' + confirmation.id, params=params)
+        response = self._session.get(self.CONF_URL + '/details/' + confirmation.data_confid, params=params)
         return response.json()['html']
 
     def _create_confirmation_params(self, tag_string: str) -> dict:
         timestamp = int(time.time())
         confirmation_key = guard.generate_confirmation_key(self._identity_secret, tag_string, timestamp)
         android_id = guard.generate_device_id(self._my_steam_id)
-        return {'p': android_id,
-                'a': self._my_steam_id,
+        return {'a': self._my_steam_id,
                 'k': confirmation_key,
+                'l': 'english',
+                'm': 'react',
+                'p': android_id,
                 't': timestamp,
-                'm': 'android',
                 'tag': tag_string}
 
     def _select_trade_offer_confirmation(self, confirmations: List[Confirmation], trade_offer_id: str) -> Confirmation:
