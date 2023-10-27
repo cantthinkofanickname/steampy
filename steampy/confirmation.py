@@ -44,9 +44,9 @@ class ConfirmationExecutor:
         return self._send_confirmation(confirmation)
 
     def _send_confirmation(self, confirmation: Confirmation) -> dict:
-        tag = Tag.ALLOW.value
+        tag = Tag.ALLOW
         params = self._create_confirmation_params(tag)
-        params['op'] = tag,
+        params['op'] = tag.value,
         params['cid'] = confirmation.data_confid
         params['ck'] = confirmation.nonce
         headers = {'X-Requested-With': 'XMLHttpRequest'}
