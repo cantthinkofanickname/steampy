@@ -137,16 +137,22 @@ class SteamClient:
             filter(lambda offer: offer['trade_offer_state'] == TradeOfferState.Active, offers_sent))
         return offers_response
 
-    def get_trade_offer(self, trade_offer_id: str, merge: bool = True) -> dict:
-        params = {'key': self._api_key,
-                  'tradeofferid': trade_offer_id,
-                  'language': 'english'}
-        response = self.api_call('GET', 'IEconService', 'GetTradeOffer', 'v1', params).json()
-        if merge and "descriptions" in response['response']:
-            descriptions = {get_description_key(offer): offer for offer in response['response']['descriptions']}
-            offer = response['response']['offer']
-            response['response']['offer'] = merge_items_with_descriptions_from_offer(offer, descriptions)
-        return response
+    def get_trade_offer(self, trade_offer_id: str, merge: bool = True, use_webtoken=False) -> dict:
+
+    params = {
+        'key' if not use_webtoken else 'access_token': self._api_key if not use_webtoken else self._access_token,
+        'tradeofferid': trade_offer_id,
+        'language': 'english'}
+
+    #params = {'key': self._api_key, 'tradeofferid': trade_offer_id, 'language': 'english'}
+    response = self.api_call('GET', 'IEconService', 'GetTradeOffer', 'v1', params).json()
+
+    if merge and 'descriptions' in response['response']:
+        descriptions = {get_description_key(offer): offer for offer in response['response']['descriptions']}
+        offer = response['response']['offer']
+        response['response']['offer'] = merge_items_with_descriptions_from_offer(offer, descriptions)
+
+    return response
 
     def get_trade_history(self,
                           max_trades=100,
@@ -179,24 +185,28 @@ class SteamClient:
 
     @login_required
     def accept_trade_offer(self, trade_offer_id: str) -> dict:
-        trade = self.get_trade_offer(trade_offer_id)
-        trade_offer_state = TradeOfferState(trade['response']['offer']['trade_offer_state'])
-        if trade_offer_state is not TradeOfferState.Active:
-            raise ApiException("Invalid trade offer state: {} ({})".format(trade_offer_state.name,
-                                                                           trade_offer_state.value))
-        partner = self._fetch_trade_partner_id(trade_offer_id)
-        session_id = self._get_session_id()
-        accept_url = SteamUrl.COMMUNITY_URL + '/tradeoffer/' + trade_offer_id + '/accept'
-        params = {'sessionid': session_id,
-                  'tradeofferid': trade_offer_id,
-                  'serverid': '1',
-                  'partner': partner,
-                  'captcha': ''}
-        headers = {'Referer': self._get_trade_offer_url(trade_offer_id)}
-        response = self._session.post(accept_url, data=params, headers=headers).json()
-        if response.get('needs_mobile_confirmation', False):
-            return self._confirm_transaction(trade_offer_id)
-        return response
+    trade = self.get_trade_offer(trade_offer_id, use_webtoken=True)
+    trade_offer_state = TradeOfferState(trade['response']['offer']['trade_offer_state'])
+    if trade_offer_state is not TradeOfferState.Active:
+        raise ApiException(f'Invalid trade offer state: {trade_offer_state.name} ({trade_offer_state.value})')
+
+    partner = self._fetch_trade_partner_id(trade_offer_id)
+    session_id = self._session.cookies.get_dict("steamcommunity.com")['sessionid']
+    accept_url = f'{SteamUrl.COMMUNITY_URL}/tradeoffer/{trade_offer_id}/accept'
+    params = {
+        'sessionid': session_id,
+        'tradeofferid': trade_offer_id,
+        'serverid': '1',
+        'partner': partner,
+        'captcha': '',
+    }
+    headers = {'Referer': self._get_trade_offer_url(trade_offer_id)}
+
+    response = self._session.post(accept_url, data=params, headers=headers).json()
+    if response.get('needs_mobile_confirmation', False):
+        return self._confirm_transaction(trade_offer_id)
+
+    return response
 
     def _fetch_trade_partner_id(self, trade_offer_id: str) -> str:
         url = self._get_trade_offer_url(trade_offer_id)
