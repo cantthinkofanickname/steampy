@@ -147,14 +147,16 @@ class LoginExecutor:
         sessionid = self.session.cookies["sessionid"]
         redir = "https://steamcommunity.com/login/home/?goto="
 
-        finallez_data = {
-            'nonce': self.refresh_token,
-            'sessionid': sessionid,
-            'redir': redir
+        files = {
+            'nonce': (None, self.refresh_token),
+            'sessionid': (None, sessionid),
+            'redir': (None, redir)
         }
-
-        response = self.session.post("https://login.steampowered.com/jwt/finalizelogin", data=finallez_data)
-        return response
+        headers = {
+            'Referer': redir,
+            'Origin': 'https://steamcommunity.com'
+        }
+        return self.session.post("https://login.steampowered.com/jwt/finalizelogin", headers=headers, files=files)
 
 
     def _setstokens(self, fin_resp):
